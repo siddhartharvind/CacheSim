@@ -75,109 +75,121 @@ void cpu_loop(int num_threads) {
     int cache_size = 2;
     cache *c = malloc((sizeof *c) * cache_size);
     
-    // Read Input file
-    FILE *inst_file = fopen("input_0.txt", "r");
-    char inst_line[20];
+    #pragma omp parallel
+    {
+        int thread_num = omp_get_thread_num();
 
-    // Decode instructions and execute them.
-    while (fgets(inst_line, sizeof inst_line, inst_file)) {
-        decoded inst = decode_inst_line(inst_line);
-        /*
-         * Cache Replacement Algorithm
-         */
-        int hash = inst.address % cache_size;
-        cache cacheline = *(c + hash);
+        // Read Input file
+        char file_name[20];
+        sprintf(file_name, "input_%d.txt", thread_num);
 
-        /*
-         * This is where you will implement the coherency check.
-         * For now, we will simply grab the latest data from memory.
-         */
-        if (cacheline.address != inst.address) {
-            // Flush current cacheline to memory
-            *(memory + cacheline.address) = cacheline.value;
+        FILE *inst_file = fopen(file_name, "r");
+        char inst_line[20];
 
-            // Assign new cacheline
-            cacheline.address = inst.address;
-            cacheline.state = -1;
+        // Decode instructions and execute them.
+        while (fgets(inst_line, sizeof inst_line, inst_file)) {
+            decoded inst = decode_inst_line(inst_line);
+            /*
+             * Cache Replacement Algorithm
+             */
+            int hash = inst.address % cache_size;
+            cache cacheline = *(c + hash);
 
-            // This is where it reads value of the address from memory
-            cacheline.value = *(memory + inst.address);
-            if (inst.type == 1) {
-                cacheline.value = inst.value;
-            }
-
-            cacheline.state = 'E'; // new
-            *(c + hash) = cacheline;
-        }
-
-        else switch (cacheline.state)
-        {
-            case 'I': {
+            /*
+             * This is where you will implement the coherency check.
+             * For now, we will simply grab the latest data from memory.
+             */
+            if (cacheline.address != inst.address) {
                 // Flush current cacheline to memory
                 *(memory + cacheline.address) = cacheline.value;
 
                 // Assign new cacheline
                 cacheline.address = inst.address;
-                cacheline.state = 'E';
+                cacheline.state = -1;
 
-                // Read value of address from memory
+                // This is where it reads value of the address from memory
                 cacheline.value = *(memory + inst.address);
                 if (inst.type == 1) {
                     cacheline.value = inst.value;
                 }
 
+                cacheline.state = 'E'; // new
                 *(c + hash) = cacheline;
-                break;
             }
 
+            else switch (cacheline.state)
+            {
+                case 'I': {
+                    // Flush current cacheline to memory
+                    *(memory + cacheline.address) = cacheline.value;
 
-            case 'S': {
-                int is_modified = 0;
+                    // Assign new cacheline
+                    cacheline.address = inst.address;
+                    cacheline.state = 'E';
 
-                // Checking if any other thread has modified the cacheline
-                if (cacheline.value != *(memory + inst.address)) {
-                    is_modified = 1;
+                    // Read value of address from memory
+                    cacheline.value = *(memory + inst.address);
+                    if (inst.type == 1) {
+                        cacheline.value = inst.value;
+                    }
+
+                    *(c + hash) = cacheline;
+                    break;
                 }
 
-                if (is_modified) {
-                    // Update cacheline in local cache
-                    cacheline.value = *(memory + inst.address);
-                    cacheline.state = 'M';
 
-                } else {
+                case 'S': {
+                    int is_modified = 0;
+                    int memory_value;
+
+                    // Checking if any other thread has modified the cacheline
+                    #pragma omp atomic read
+                    memory_value = *(memory + inst.address);
+
+                    if (cacheline.value != memory_value) {
+                        is_modified = 1;
+                    }
+
+                    if (is_modified) {
+                        // Update cacheline in local cache
+                        cacheline.value = *(memory + inst.address);
+                        cacheline.state = 'M';
+
+                    } else {
+                        if (inst.type == 1) {
+                            // Modify the cacheline
+                            cacheline.value = inst.value;
+                            cacheline.state = 'S';
+                        }
+                    }
+                    break;
+                }
+
+                case 'M': {
                     if (inst.type == 1) {
                         // Modify the cacheline
                         cacheline.value = inst.value;
-                        cacheline.state = 'S';
+                        cacheline.state = 'M';
                     }
+                    break;
                 }
-                break;
-            }
 
-            case 'M': {
-                if (inst.type == 1) {
-                    // Modify the cacheline
-                    cacheline.value = inst.value;
-                    cacheline.state = 'M';
+                default: {
+                    continue;
                 }
-                break;
             }
 
-            default: {
-                continue;
-            }
-        }
+            switch (inst.type) {
+                case 0:
+                    // printf("Reading from address %d: %d\n", cacheline.address, cacheline.value);
+                    printf("Thread %d: RD %d: %d\n", thread_num, cacheline.address, cacheline.value);
+                    break;
 
-        switch (inst.type) {
-            case 0:
-                // printf("Reading from address %d: %d\n", cacheline.address, cacheline.value);
-                printf("Thread 0: RD %d: %d\n", cacheline.address, cacheline.value);
-                break;
-            
-            case 1:
-                // printf("Writing to address %d: %d\n", cacheline.address, cacheline.value);
-                printf("Thread 0: WR %d: %d\n", cacheline.address, cacheline.value);
-                break;
+                case 1:
+                    // printf("Writing to address %d: %d\n", cacheline.address, cacheline.value);
+                    printf("Thread %d: WR %d: %d\n", thread_num, cacheline.address, cacheline.value);
+                    break;
+            }
         }
     }
 
