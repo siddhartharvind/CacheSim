@@ -11,7 +11,7 @@ struct cache {
     byte address; // This is the address in memory.
     byte value; // This is the value stored in cached memory.
     // State for you to implement MESI protocol.
-    byte state;
+    byte state; // Values: 'M', 'E', 'S', 'I'
 };
 
 struct decoded_inst {
@@ -80,16 +80,16 @@ void cpu_loop(int num_threads) {
     char inst_line[20];
 
     // Decode instructions and execute them.
-    while (fgets(inst_line, sizeof inst_line, inst_file)){
+    while (fgets(inst_line, sizeof inst_line, inst_file)) {
         decoded inst = decode_inst_line(inst_line);
         /*
          * Cache Replacement Algorithm
          */
-        int hash = inst.address%cache_size;
-        cache cacheline = *(c+hash);
+        int hash = inst.address % cache_size;
+        cache cacheline = *(c + hash);
 
         /*
-         * This is where you will implement the coherancy check.
+         * This is where you will implement the coherency check.
          * For now, we will simply grab the latest data from memory.
          */
         if (cacheline.address != inst.address) {
@@ -105,16 +105,78 @@ void cpu_loop(int num_threads) {
             if (inst.type == 1) {
                 cacheline.value = inst.value;
             }
+
+            cacheline.state = 'E'; // new
             *(c + hash) = cacheline;
         }
 
-        switch(inst.type) {
+        else switch (cacheline.state)
+        {
+            case 'I': {
+                // Flush current cacheline to memory
+                *(memory + cacheline.address) = cacheline.value;
+
+                // Assign new cacheline
+                cacheline.address = inst.address;
+                cacheline.state = 'E';
+
+                // Read value of address from memory
+                cacheline.value = *(memory + inst.address);
+                if (inst.type == 1) {
+                    cacheline.value = inst.value;
+                }
+
+                *(c + hash) = cacheline;
+                break;
+            }
+
+
+            case 'S': {
+                int is_modified = 0;
+
+                // Checking if any other thread has modified the cacheline
+                if (cacheline.value != *(memory + inst.address)) {
+                    is_modified = 1;
+                }
+
+                if (is_modified) {
+                    // Update cacheline in local cache
+                    cacheline.value = *(memory + inst.address);
+                    cacheline.state = 'M';
+
+                } else {
+                    if (inst.type == 1) {
+                        // Modify the cacheline
+                        cacheline.value = inst.value;
+                        cacheline.state = 'S';
+                    }
+                }
+                break;
+            }
+
+            case 'M': {
+                if (inst.type == 1) {
+                    // Modify the cacheline
+                    cacheline.value = inst.value;
+                    cacheline.state = 'M';
+                }
+                break;
+            }
+
+            default: {
+                continue;
+            }
+        }
+
+        switch (inst.type) {
             case 0:
-                printf("Reading from address %d: %d\n", cacheline.address, cacheline.value);
+                // printf("Reading from address %d: %d\n", cacheline.address, cacheline.value);
+                printf("Thread 0: RD %d: %d\n", cacheline.address, cacheline.value);
                 break;
             
             case 1:
-                printf("Writing to address %d: %d\n", cacheline.address, cacheline.value);
+                // printf("Writing to address %d: %d\n", cacheline.address, cacheline.value);
+                printf("Thread 0: WR %d: %d\n", cacheline.address, cacheline.value);
                 break;
         }
     }
