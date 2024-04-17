@@ -1,4 +1,4 @@
-# Building a cache coherant Cache Access Simulator 
+# Building a cache coherent Cache Access Simulator 
 `cache_sim.c` is a simple cache simulator. There is a memory region along with an L1 Cache. The cache is replaced using a simple direct-mapped policy.
 
 The program reads a file `input_0.txt` which consists of a set of instructions, which can be either Reads or Writes, and then executes them. 
